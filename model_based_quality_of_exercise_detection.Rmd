@@ -1,0 +1,58 @@
+---
+title: "Model Based Quality of Exercise Detection"
+author: "Ryan Johnson"
+date: "July 24, 2015"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(caret)
+
+
+# Load the datasets
+train <- read.csv('pml-training.csv')
+test <- read.csv('pml-testing.csv')
+```
+
+Note: Testing set is very small. This will most likely cause our confidence in the out-of-sample accuracy to be low.
+
+Since the test set is based on individual samples of the raw sensor values (instances in time), I will attempt to build a model using the raw sensor values. As a future improvement, it may be beneficial to create "features" using a window of time. 
+
+The training data includes different "windows". At the end of the windows, there are calculations (mean, variance, etc...). I am assuming a window is one repitition of the exercise and the computations capture statistics of the the overall rep. I will begin by removing these entries (indicated by "new_window" column equal to "yes") from the training set.
+
+I am going to split the training... Use K-folds...
+
+
+```{r, echo=FALSE}
+set.seed(1235)
+
+# Remove rows that specify the new_window = 'yes' - I am assuming that these rows represent computed values of previous raw sensor values and I only want to build a model on raw sensor data
+trainN <- train[! train$new_window %in% c('yes'), ]
+
+# Remove the empty and NA columns
+trainA <- trainN[, !apply(is.na(trainN), 2, all)]
+trainB <- trainA[, colSums(trainA != "") != 0]
+
+# Remove the variables that won't be used in the model
+excludeVars <- names(trainB) %in% c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
+trainC <- trainB[!excludeVars]
+
+# To get a feel for the variables, let's create a correlation matrix and plot
+c <- corr(trainC)
+ccorrplot(c, method="sqaure")
+
+# Using PCA, we could convert the variables that may be correlated to a set of linearly uncorrelated variables. This will result in the largest amount of variablility in the data as possible. However, another approach is to use Random Forests (which uses sampling with replacement) to detect variable interactions. Further, there have been studies showing that Random Forests are great models for activity detection where the raw sensors have a large amount of noise (See http://www.robertjross.org/wp-content/uploads/2014/04/ross-kelleher-uncertainty-in-AAL.pdf). 
+
+# Because we have a large dataset, I am going to perform a 60%/40% split
+inTrain <- createDataPartition(y=trainC$classe, p=0.6, list=FALSE)
+trainD <- trainC[inTrain,]
+testD <- trainC[-inTrain,]
+
+# Now Train with Random Forests - make sure to make the classe predictor a factor variable
+modFit <- train(factor(classe) ~., data=trainD, method="rf", prox=TRUE)
+
+# 
+
+
+
+```
