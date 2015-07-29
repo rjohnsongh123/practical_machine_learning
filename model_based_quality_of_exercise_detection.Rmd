@@ -5,54 +5,165 @@ date: "July 24, 2015"
 output: html_document
 ---
 
-```{r, echo=FALSE}
-library(caret)
+Devices like Fitbit, Nike FuelBand, and Jawbone Up have enabled the ability to collect a large amount of data about personal activity. These devices allow people to quantify how much of a particular activity they do. In this experiement, we use a dataset that includes data from accelerometers on a belt, forarm, arm and dumbell to try to quantify how well people perform an exercise activity. The dataset includes data from 6 participants who were instructed to perform an exercise correctly and incorrectly. 
 
+```{r, echo=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(corrplot)
+library(randomForest)
 
 # Load the datasets
-train <- read.csv('pml-training.csv')
-test <- read.csv('pml-testing.csv')
+data <- read.csv('pml-training.csv')
+#test <- read.csv('pml-testing.csv')
+
+set.seed(1235)
 ```
 
-Note: Testing set is very small. This will most likely cause our confidence in the out-of-sample accuracy to be low.
+The dataset contains many variables. The "classe"" variable is the label for each sample and each class indicates how well a participant performed the exercise. Many of the variables are raw sensor values. The samples are taken at specific time intervals. 
 
-Since the test set is based on individual samples of the raw sensor values (instances in time), I will attempt to build a model using the raw sensor values. As a future improvement, it may be beneficial to create "features" using a window of time. 
+It is assumed that the training data includes discrete samples during a repetition of the exercise. At the end of the repetition, there are statistical calculations (mean, variance, etc...) of sampled data during the repetition. The samples with these computations are indicated with the "new_window" variable set to "yes". Since I am not sure if these samples include the raw sensor data, I begin by removing these entries from the data.  I also remove variables that have any "NA" entries and variables that are "NULL".
 
-The training data includes different "windows". At the end of the windows, there are calculations (mean, variance, etc...). I am assuming a window is one repitition of the exercise and the computations capture statistics of the the overall rep. I will begin by removing these entries (indicated by "new_window" column equal to "yes") from the training set.
+Since the test set for the second part of this project is based on the raw sensor values, I attempt to build a model using the raw sensor values. As such, I remove the variables "X", "user_name", "raw_timestamp_part1", "raw_timestamp_part_2", "cvt_timestamp", "new_window", and "num_Window" from the predictors. Note: As a future improvement, it may be beneficial to create "features" using a window of time (sliding window at 1 second or 2 seconds, etc...). 
 
-I am going to split the training... Use K-folds...
+The final list of predictors is as follows.
 
 
 ```{r, echo=FALSE}
-set.seed(1235)
 
 # Remove rows that specify the new_window = 'yes' - I am assuming that these rows represent computed values of previous raw sensor values and I only want to build a model on raw sensor data
-trainN <- train[! train$new_window %in% c('yes'), ]
+data <- data[! data$new_window %in% c('yes'), ]
 
 # Remove the empty and NA columns
-trainA <- trainN[, !apply(is.na(trainN), 2, all)]
-trainB <- trainA[, colSums(trainA != "") != 0]
+data <- data[, !apply(is.na(data), 2, all)]
+data <- data[, colSums(data != "") != 0]
 
 # Remove the variables that won't be used in the model
-excludeVars <- names(trainB) %in% c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
-trainC <- trainB[!excludeVars]
+excludeVars <- names(data) %in% c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
+data <- data[!excludeVars]
+```
+
+```{r}
+
+colnames(data)
+```
+
+To get a feel for the correlation of the variables, consider the following a correlation matrix. Many of the variables are uncorrelated. 
+
+```{r}
 
 # To get a feel for the variables, let's create a correlation matrix and plot
-c <- corr(trainC)
-ccorrplot(c, method="sqaure")
+c <- cor(data[,1:52])
+corrplot(c,method="square")
+```
 
-# Using PCA, we could convert the variables that may be correlated to a set of linearly uncorrelated variables. This will result in the largest amount of variablility in the data as possible. However, another approach is to use Random Forests (which uses sampling with replacement) to detect variable interactions. Further, there have been studies showing that Random Forests are great models for activity detection where the raw sensors have a large amount of noise (See http://www.robertjross.org/wp-content/uploads/2014/04/ross-kelleher-uncertainty-in-AAL.pdf). 
+Using PCA, we could convert the variables that are correlated to a set of linearly uncorrelated variables. This will result in the largest amount of variability in the data possible. 
 
-# Because we have a large dataset, I am going to perform a 60%/40% split
-inTrain <- createDataPartition(y=trainC$classe, p=0.6, list=FALSE)
-trainD <- trainC[inTrain,]
-testD <- trainC[-inTrain,]
+Another approach is to use Random Forests (which uses sampling with replacement) to detect variable importance. Further, there have been studies showing that Random Forests are great models for activity detection where the raw sensors have a large amount of noise (See http://www.robertjross.org/wp-content/uploads/2014/04/ross-kelleher-uncertainty-in-AAL.pdf).
 
-# Now Train with Random Forests - make sure to make the classe predictor a factor variable
-modFit <- train(factor(classe) ~., data=trainD, method="rf", prox=TRUE)
+Leveraging this study, I choose not to pre-process the variables and use each variable in the list above to train a Random Forest model.  
 
-# 
+Because the dataset is large, I perform a 60%/20%/20% split - 60% for training, 20% for cross-validation, and 20% for test. The test set is separate from the test set of the second part of the project because I feel a larger test set will give a better indication of the expected out-of-sample error rate. The number of samples in each dataset is as follows:
 
+```{r, echo=FALSE}
+inTrain <- createDataPartition(y=data$classe, p=0.6, list=FALSE)
+train <- data[inTrain,]
+tmptest <- data[-inTrain,]
 
+inTest <- createDataPartition(y=tmptest$classe, p=0.5, list=FALSE)
+test <- tmptest[inTest,]
+cv <- tmptest[-inTest,]
+```
+
+```{r}
+nrow(train)
+nrow(cv)
+nrow(test)
 
 ```
+
+Random Forest create an unbiased estimate of the out-of-sample error during training because of the out-of-bag (oob) method employed. This helps Random Forests to not over-fit the data. To verify that the model is not over-fit, a learning curve is created using the training and cross-validation data sets. The learning curve is created by incrementing the maximum number of nodes allowed in each tree. 
+
+The following figure shows that as the maximum number of nodes is increased, the accuracy increases but the train accuracy and the cross-validation accuracy remain fairly consistent. 
+
+```{r, echo=FALSE}
+# I use the cross validation and training sets to  create a learning curve to verify that the model is not overfit.
+cv_acc = NULL
+train_acc = NULL
+maxNodes = NULL
+
+idx <- 1
+for ( i in seq(100, 1000, 100) ) {
+  
+  modFit <- randomForest(factor(classe) ~., data=train, ntree=500, maxnodes=i, importance=TRUE)
+  
+  
+  
+  pred <- predict(modFit,cv)
+  predRight <- pred==factor(cv$classe)
+  cv_acc[idx] <- sum(predRight)/length(predRight)
+  
+  pred <- predict(modFit,train)
+  predRight <- pred==factor(train$classe)
+  train_acc[idx] <- sum(predRight)/length(predRight)
+  
+  maxNodes[idx] = i
+  
+  idx <- idx + 1
+  
+}
+curve <- data.frame(maxNodes, cv_acc, train_acc)
+ggplot(data=curve, aes(x = maxNodes)) + 
+  geom_line(aes(y = cv_acc, colour = "cv_acc")) + 
+  geom_line(aes(y = train_acc, colour = "train_acc")) + 
+  ylab(label="Accuracy") + 
+  xlab(label="Max Nodes") + 
+  scale_colour_manual("", 
+                      breaks = c("cv_acc", "train_acc"),
+                      values = c("red", "green"))
+```
+
+The best performing model will be a model that has no limitations on the maximum number of tree nodes. I train a model with no restriction on the number of tree nodes and allow for up to 500 trees. The "classe"" predictor is interpreted as a factor. 
+
+One of the main trade-offs with Random Forests is the training time. With a dataset this large, the training time can be long. 
+
+Because we used the cross-validation set for the learning curve, we must determine the final out-of-sample accuracy using the test set. The "randomForest" function can take the test set as an input and outputs the error rate. This matches the accuracy of the test set using the "predict" function.
+
+```{r, echo=FALSE}
+set.seed(71)
+modFit <- randomForest(x=train[,1:52],y=factor(train$classe), ntree=500, maxnodes=NULL, importance=TRUE, xtest=test[,1:52], ytest=factor(test$classe), keep.forest=TRUE)
+
+# Results 
+print(modFit)
+
+# Final accuracy
+pred <- predict(modFit,cv)
+predRight <- pred==factor(cv$classe)
+cv_acc <- sum(predRight)/length(predRight)
+
+pred <- predict(modFit,train)
+predRight <- pred==factor(train$classe)
+train_acc <- sum(predRight)/length(predRight)
+
+pred <- predict(modFit,test)
+predRight <- pred==factor(test$classe)
+test_acc <- sum(predRight)/length(predRight)
+```
+
+```{r}
+print(train_acc * 100)
+print(cv_acc*100)
+print(test_acc*100)
+```
+
+The importance of the variables is as follows:
+
+```{r}
+print(varImp(modFit))
+
+```
+
+Since the train and test accuracies are similar, I conclude that the model is not over fit. The test accuracy is very high. I would expect prediction of out-of-sample data to be about 99% accurate. The accuracy is high enough that there is no reason to try other models for improvement.
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
